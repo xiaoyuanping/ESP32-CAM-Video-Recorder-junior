@@ -121,7 +121,7 @@ String TIMEZONE = "GMT0BST,M3.5.0/01,M10.5.0/02";
 
 int framesize = FRAMESIZE_HD;
 int quality = 12;
-int framesizeconfig = FRAMESIZE_UXGA;
+int framesizeconfig = 10;
 int qualityconfig = 5;
 int buffersconfig = 3;
 int avi_length = 1800;            // how long a movie in seconds -- 1800 sec = 30 min
@@ -1487,6 +1487,7 @@ bool init_wifi() {
   //Serial.printf("The power save was: %d\n", the_type);
   //Serial.printf("Set power save to %d\n", WIFI_PS_NONE);
   esp_err_t set_ps = esp_wifi_set_ps(WIFI_PS_NONE);
+  esp_wifi_set_max_tx_power(34);   // 单位 0.25dBm，34 ≈ 8.5dBm，比默认 20dBm 低很多
   esp_err_t new_ps = esp_wifi_get_ps(&the_type);
   Serial.printf("The power save is : %d\n", the_type);
 
@@ -2408,7 +2409,7 @@ void delete_old_stuff();
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 void setup() {
-
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
   Serial.begin(115200);
   Serial.println("\n\n---");
 
