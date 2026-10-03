@@ -603,11 +603,11 @@ void read_config_file() {
   String junk;
 
   String cname = "desklens";
-  int cframesize = 11;
-  int cquality = 12;
-  int cframesizeconfig = 13;
+  int cframesize = 8;
+  int cquality = 8;
+  int cframesizeconfig = 10;
   int cqualityconfig = 5;
-  int cbuffersconfig = 4; //58.9
+  int cbuffersconfig = 3; //58.9
   int clength = 1800;
   int cinterval = 0;
   int cspeedup = 1;
