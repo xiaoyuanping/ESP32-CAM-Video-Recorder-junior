@@ -120,11 +120,11 @@ String TIMEZONE = "GMT0BST,M3.5.0/01,M10.5.0/02";
 #define blinking 0
 
 int framesize = FRAMESIZE_HD;
-int quality = 12;
+int quality = 8;
 int framesizeconfig = 10;
 int qualityconfig = 5;
 int buffersconfig = 3;
-int avi_length = 1800;            // how long a movie in seconds -- 1800 sec = 30 min
+int avi_length = 600;            // how long a movie in seconds -- 1800 sec = 30 min
 int frame_interval = 0;          // record at full speed
 int speed_up_factor = 1;          // play at realtime
 int stream_delay = 500;           // minimum of 500 ms delay between frames
@@ -134,7 +134,7 @@ bool timer_enable = true;           // true: 启用定时录像，忽略GPIO12�
 int timer_start_hour = 3;           // 每天开启录像的小时 0-23
 int timer_start_minute = 0;         // 每天开启录像的分钟 0-59
 int timer_stop_hour = 5;           // 每天关闭录像的小时 0-23
-int timer_stop_minute = 5;          // 每天关闭录像的分钟 0-59
+int timer_stop_minute = 50;          // 每天关闭录像的分钟 0-59
 bool timer_recording = false;       // 当前是否处于定时录像时段
 unsigned long last_start_trigger_min = 0; // 防止同一分钟重复触发开启
 unsigned long last_stop_trigger_min = 0;  // 防止同一分钟重复触发关闭
