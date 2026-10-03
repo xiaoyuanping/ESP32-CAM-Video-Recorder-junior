@@ -129,7 +129,15 @@ int frame_interval = 0;          // record at full speed
 int speed_up_factor = 1;          // play at realtime
 int stream_delay = 500;           // minimum of 500 ms delay between frames
 int MagicNumber = 12;                // change this number to reset the eprom in your esp32 for file numbers
-
+// ===== 定时录像配置：两个时间点，一个开一个关 =====
+bool timer_enable = true;           // true: 启用定时录像，忽略GPIO12；false: 恢复GPIO12手动控制
+int timer_start_hour = 3;           // 每天开启录像的小时 0-23
+int timer_start_minute = 0;         // 每天开启录像的分钟 0-59
+int timer_stop_hour = 3;           // 每天关闭录像的小时 0-23
+int timer_stop_minute = 5;          // 每天关闭录像的分钟 0-59
+bool timer_recording = false;       // 当前是否处于定时录像时段
+unsigned long last_start_trigger_min = 0; // 防止同一分钟重复触发开启
+unsigned long last_stop_trigger_min = 0;  // 防止同一分钟重复触发关闭
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 bool configfile = false;
@@ -1712,7 +1720,41 @@ static esp_err_t time_handler(httpd_req_t *req) {
 
   return ESP_OK;
 }
+static esp_err_t timer_handler(httpd_req_t *req) {
+  char buf[256];
+  size_t buf_len = httpd_req_get_url_query_len(req) + 1;
 
+  if (buf_len > 1) {
+    char query[256];
+    if (httpd_req_get_url_query_str(req, query, buf_len) == ESP_OK) {
+      char param[16];
+
+      if (httpd_query_key_value(query, "enable", param, sizeof(param)) == ESP_OK) {
+        timer_enable = atoi(param);
+      }
+      if (httpd_query_key_value(query, "sh", param, sizeof(param)) == ESP_OK) {
+        timer_start_hour = atoi(param);
+      }
+      if (httpd_query_key_value(query, "sm", param, sizeof(param)) == ESP_OK) {
+        timer_start_minute = atoi(param);
+      }
+      if (httpd_query_key_value(query, "eh", param, sizeof(param)) == ESP_OK) {
+        timer_stop_hour = atoi(param);
+      }
+      if (httpd_query_key_value(query, "em", param, sizeof(param)) == ESP_OK) {
+        timer_stop_minute = atoi(param);
+      }
+    }
+  }
+
+  snprintf(buf, sizeof(buf),
+           "定时设置: enable=%d, 开启=%02d:%02d, 关闭=%02d:%02d\n",
+           timer_enable, timer_start_hour, timer_start_minute,
+           timer_stop_hour, timer_stop_minute);
+
+  httpd_resp_send(req, buf, strlen(buf));
+  return ESP_OK;
+}
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 //
@@ -2266,7 +2308,7 @@ void start_Stream_82_server() {
 
 void startCameraServer() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-  config.max_uri_handlers = 8;
+  config.max_uri_handlers = 10;
   config.stack_size = 4096 + 1024;
 
   Serial.print("http task prio: "); Serial.println(config.task_priority);
@@ -2331,7 +2373,12 @@ void startCameraServer() {
     .handler   = time_handler,
     .user_ctx  = NULL
   };
-
+  httpd_uri_t timer_uri = {
+    .uri       = "/timer",
+    .method    = HTTP_GET,
+    .handler   = timer_handler,
+    .user_ctx  = NULL
+  };
   if (httpd_start(&camera_httpd, &config) == ESP_OK) {
     httpd_register_uri_handler(camera_httpd, &index_uri);
     httpd_register_uri_handler(camera_httpd, &capture_uri);
@@ -2342,6 +2389,7 @@ void startCameraServer() {
     httpd_register_uri_handler(camera_httpd, &reboot_uri);
     httpd_register_uri_handler(camera_httpd, &restart_uri);
     httpd_register_uri_handler(camera_httpd, &time_uri);
+    httpd_register_uri_handler(camera_httpd, &timer_uri);
   }
 
   Serial.println("Camera http started");
@@ -2737,19 +2785,59 @@ void loop() {
     delete_old_stuff_flag = 0;
     delete_old_stuff();
   }
-  start_record_2nd_opinion = start_record_1st_opinion;
-  start_record_1st_opinion = digitalRead(12);
 
-  if (start_record_1st_opinion == start_record_2nd_opinion ) {
-    if (start_record_1st_opinion > 0 ) start_record = 1;
-    else start_record = 0;
+  // ================= 定时录像控制：两个时间点，一个开一个关 =================
+  if (timer_enable) {
+    time(&now);
+    localtime_r(&now, &timeinfo);
+
+    unsigned long current_minute = (unsigned long)(now / 60);
+    int current_h = timeinfo.tm_hour;
+    int current_m = timeinfo.tm_min;
+
+    // 到达开启时间
+    if (current_h == timer_start_hour && current_m == timer_start_minute) {
+      if (current_minute != last_start_trigger_min) {
+        last_start_trigger_min = current_minute;
+        timer_recording = true;
+        Serial.printf("定时开启录像: %02d:%02d\n", timer_start_hour, timer_start_minute);
+        logfile.printf("Timer start recording: %02d:%02d\n", timer_start_hour, timer_start_minute);
+        logfile.flush();
+      }
+    }
+
+    // 到达关闭时间
+    if (current_h == timer_stop_hour && current_m == timer_stop_minute) {
+      if (current_minute != last_stop_trigger_min) {
+        last_stop_trigger_min = current_minute;
+        timer_recording = false;
+        Serial.printf("定时关闭录像: %02d:%02d\n", timer_stop_hour, timer_stop_minute);
+        logfile.printf("Timer stop recording: %02d:%02d\n", timer_stop_hour, timer_stop_minute);
+        logfile.flush();
+      }
+    }
   }
 
+  // 根据模式决定 start_record
+  if (timer_enable) {
+    start_record = timer_recording ? 1 : 0;
+  } else {
+    // 原 GPIO12 手动控制逻辑
+    start_record_2nd_opinion = start_record_1st_opinion;
+    start_record_1st_opinion = digitalRead(12);
+
+    if (start_record_1st_opinion == start_record_2nd_opinion ) {
+      if (start_record_1st_opinion > 0 ) start_record = 1;
+      else start_record = 0;
+    }
+  }
+
+  // ================= 以下保持原有逻辑不变 =================
   int read13 = digitalRead(13);
   delay(20);
-  read13 = read13 + digitalRead(13);  // get 2 opinions to help poor soldering
+  read13 = read13 + digitalRead(13);
 
-  if (IncludeInternet == 4 || IncludeInternet == 2 || IncludeInternet == 5) {  // 4 is oppoiste of 3, so, flip read13
+  if (IncludeInternet == 4 || IncludeInternet == 2 || IncludeInternet == 5) {
     if (read13 > 0) {
       read13 = 0;
     } else {
@@ -2762,8 +2850,6 @@ void loop() {
       Serial.println("Shutting off wifi ..."); logfile.println("Shutting off wifi ...");
       filemgr.end();
       stopCameraServer();
-      //WiFiManager wm;
-      //wm.disconnect();
       WiFi.disconnect();
       InternetOff = true;
     }
@@ -2780,15 +2866,13 @@ void loop() {
   }
 
   wakeup = millis();
-  if (wakeup - last_wakeup > (15  * 60 * 1000) ) {       // 15 minutes
+  if (wakeup - last_wakeup > (15  * 60 * 1000) ) {
     last_wakeup = millis();
     if (!InternetOff && IncludeInternet != 5) {
       if (WiFi.status() != WL_CONNECTED) {
-
         Serial.println("***** WiFi reconnect *****");
         WiFi.reconnect();
         delay(8000);
-
         if (WiFi.status() != WL_CONNECTED) {
           Serial.println("***** WiFi rerestart *****");
           init_wifi();
@@ -2813,14 +2897,13 @@ void loop() {
     }
   }
 
-
   if (reboot_now == true) {
     Serial.println(" \n\n\n Rebooting ... \n\n\n");
     delay(2000);
     ESP.restart();
   }
   if (!InternetOff) {
-    filemgr.handleClient();  //v56
+    filemgr.handleClient();
   }
   delay(200);
 
